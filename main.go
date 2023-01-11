@@ -59,7 +59,11 @@ func (app *App) redraw() {
 		if v, err := gui.View("info"); err == nil {
 			v.Clear()
 			fmt.Fprintf(v, "lat: %.6f lon: %.6f\n", app.info.getFloat("lat"), app.info.getFloat("lon"))
-			fmt.Fprintf(v, "roll: %.2f pitch: %.2f yaw: %.2f\n", app.info.getFloat("roll"), app.info.getFloat("pitch"), app.info.getFloat("yaw"))
+			fmt.Fprintf(v, "roll: %s pitch: %s yaw: %s\n",
+				formatGyro(app.info.getFloat("roll")),
+				formatGyro(app.info.getFloat("pitch")),
+				formatGyro(app.info.getFloat("yaw")))
+			fmt.Fprintf(v, "em: %d battery: %.2fv\n", app.info.getByte("em"), app.info.getFloat("battery"))
 		}
 		if v, err := gui.View("data"); err == nil {
 			v.Clear()
@@ -81,6 +85,17 @@ func (app *App) redraw() {
 
 		return nil
 	})
+}
+
+func formatGyro(v float64) string {
+	s := fmt.Sprintf("%7.2f", v)
+	if v > -5 && v < 5 {
+		return WithColors(s, FgGreen)
+	}
+	if v > -30 && v < 30 {
+		return WithColors(s, FgYellow)
+	}
+	return WithColors(s, Bold, FgRed)
 }
 
 func (app *App) sender4() {

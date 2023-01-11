@@ -20,6 +20,16 @@ func (d *DroneInfo) getFloat(key string) float64 {
 	return 0
 }
 
+func (d *DroneInfo) getByte(key string) byte {
+	if v, ok := d.info.Load(key); ok {
+		if vv, ok2 := v.(byte); ok2 {
+			return vv
+		}
+	}
+
+	return 0
+}
+
 func (d *DroneInfo) put(key string, v any) {
 	d.info.Store(key, v)
 }
