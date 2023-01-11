@@ -21,14 +21,18 @@ type App struct {
 	lastData  time.Time
 	data      sync.Map
 	info      *DroneInfo
+	logger    *Logger
 }
 
 func NewApp() *App {
-	return &App{
+	app := &App{
 		commandCh: make(chan []byte, 10),
 		data:      sync.Map{},
 		info:      &DroneInfo{info: sync.Map{}},
+		logger:    NewLogger(),
 	}
+	app.logger.cb = app.redraw
+	return app
 }
 
 func (app *App) layout(g *gocui.Gui) error {
@@ -81,6 +85,10 @@ func (app *App) redraw() {
 		}
 		if v, err := gui.View("log"); err == nil {
 			v.Clear()
+			_, size := v.Size()
+			for _, l := range app.logger.GetLines(size) {
+				fmt.Fprintln(v, l)
+			}
 		}
 
 		return nil
@@ -98,76 +106,6 @@ func formatGyro(v float64) string {
 	return WithColors(s, Bold, FgRed)
 }
 
-func (app *App) sender4() {
-	ticker := time.NewTicker(time.Second * 3)
-	for app.ctx.Err() == nil {
-		select {
-		case <-ticker.C:
-			conn, err := net.Dial("udp", "192.168.0.1:40000")
-			if err != nil {
-				panic(err)
-			}
-			err = conn.SetWriteDeadline(time.Now().Add(time.Second * 3))
-			if err != nil {
-				panic(err)
-			}
-
-			_, err = conn.Write([]byte{0x63, 0x63, 1, 0, 0, 0, 0})
-			if err != nil {
-				panic(err)
-			}
-			_ = conn.Close()
-		case <-app.ctx.Done():
-			break
-		}
-	}
-	ticker.Stop()
-}
-
-func (app *App) sender5() {
-	for {
-		select {
-		case data := <-app.commandCh:
-			if _, err := app.conn.Write(data); err != nil {
-				fmt.Println(err)
-			}
-		case <-app.ctx.Done():
-			return
-		}
-	}
-}
-
-func (app *App) pinger() {
-	ticker := time.NewTicker(time.Second * 3)
-	for app.ctx.Err() == nil {
-		select {
-		case <-ticker.C:
-			app.commandCh <- createMessage(0x0b, []byte{0, 0, 0, 0, 0, 0, 0, 0})
-		case <-app.ctx.Done():
-			break
-		}
-	}
-	ticker.Stop()
-}
-
-func (app *App) reader() {
-	buf := make([]byte, 4096)
-	for app.ctx.Err() == nil {
-		n, err := app.conn.Read(buf)
-		if err != nil {
-			continue
-		}
-		app.lastData = time.Now()
-		msg := make([]byte, n)
-		copy(msg, buf[:n])
-		if err := app.processMessage(msg); err != nil {
-			fmt.Println(err)
-			continue
-		}
-		app.redraw()
-	}
-}
-
 func (app *App) Run() {
 	var err error
 
@@ -180,7 +118,7 @@ func (app *App) Run() {
 	app.g.SetManagerFunc(app.layout)
 
 	if err := app.g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, app.quit); err != nil {
-		log.Panicln(err)
+		panic(err)
 	}
 
 	app.ctx, app.cancel = context.WithCancel(context.Background())
@@ -192,10 +130,9 @@ func (app *App) Run() {
 
 	//go sender4(ctx)
 	go app.sender5()
-
-	app.commandCh <- createMessage(0x0b, []byte{0, 0, 0, 0, 0, 0, 0, 0})
-	go app.pinger()
 	go app.reader()
+
+	go app.pinger()
 
 	if err := app.g.MainLoop(); err != nil && err != gocui.ErrQuit {
 		log.Panicln(err)
