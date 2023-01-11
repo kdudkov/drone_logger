@@ -2,18 +2,90 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
+	"log"
 	"net"
-	"os"
-	"os/signal"
-	"syscall"
+	"sort"
+	"sync"
 	"time"
+
+	"github.com/jroimartin/gocui"
 )
 
-func sender4(ctx context.Context) {
+type App struct {
+	g         *gocui.Gui
+	commandCh chan []byte
+	conn      net.Conn
+	ctx       context.Context
+	cancel    context.CancelFunc
+	lastData  time.Time
+	data      sync.Map
+	info      *DroneInfo
+}
+
+func NewApp() *App {
+	return &App{
+		commandCh: make(chan []byte, 10),
+		data:      sync.Map{},
+		info:      &DroneInfo{info: sync.Map{}},
+	}
+}
+
+func (app *App) layout(g *gocui.Gui) error {
+	maxX, maxY := g.Size()
+	if v, err := g.SetView("info", 0, 0, maxX/2-1, maxY/2); err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		v.Frame = true
+	}
+	if v, err := g.SetView("data", 0, maxY/2+1, maxX/2-1, maxY-1); err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		v.Frame = true
+	}
+	if v, err := g.SetView("log", maxX/2, 0, maxX-1, maxY-1); err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		v.Frame = true
+	}
+	return nil
+}
+
+func (app *App) redraw() {
+	app.g.Update(func(gui *gocui.Gui) error {
+		if v, err := gui.View("info"); err == nil {
+			v.Clear()
+			fmt.Fprintf(v, "lat: %.6f lon: %.6f\n", app.info.getFloat("lat"), app.info.getFloat("lon"))
+			fmt.Fprintf(v, "roll: %.2f pitch: %.2f yaw: %.2f\n", app.info.getFloat("roll"), app.info.getFloat("pitch"), app.info.getFloat("yaw"))
+		}
+		if v, err := gui.View("data"); err == nil {
+			v.Clear()
+			m := make(map[int]string)
+			keys := make([]int, 0)
+			app.data.Range(func(key, value any) bool {
+				m[int(key.(byte))] = arr2str(value.([]byte))
+				keys = append(keys, int(key.(byte)))
+				return true
+			})
+			sort.Ints(keys)
+			for _, k := range keys {
+				fmt.Fprintf(v, "%.2x: %s\n", k, m[k])
+			}
+		}
+		if v, err := gui.View("log"); err == nil {
+			v.Clear()
+		}
+
+		return nil
+	})
+}
+
+func (app *App) sender4() {
 	ticker := time.NewTicker(time.Second * 3)
-	for ctx.Err() == nil {
+	for app.ctx.Err() == nil {
 		select {
 		case <-ticker.C:
 			conn, err := net.Dial("udp", "192.168.0.1:40000")
@@ -30,142 +102,101 @@ func sender4(ctx context.Context) {
 				panic(err)
 			}
 			_ = conn.Close()
-		case <-ctx.Done():
+		case <-app.ctx.Done():
 			break
 		}
 	}
 	ticker.Stop()
 }
 
-func sender5(ctx context.Context, conn net.Conn, ch chan []byte) {
+func (app *App) sender5() {
 	for {
 		select {
-		case data := <-ch:
-			if _, err := conn.Write(data); err != nil {
+		case data := <-app.commandCh:
+			if _, err := app.conn.Write(data); err != nil {
 				fmt.Println(err)
 			}
-		case <-ctx.Done():
+		case <-app.ctx.Done():
 			return
 		}
 	}
 }
 
-func pinger(ctx context.Context, ch chan []byte) {
+func (app *App) pinger() {
 	ticker := time.NewTicker(time.Second * 3)
-	for ctx.Err() == nil {
+	for app.ctx.Err() == nil {
 		select {
 		case <-ticker.C:
-			ch <- createMessage(0x0b, []byte{0, 0, 0, 0, 0, 0, 0, 0})
-		case <-ctx.Done():
+			app.commandCh <- createMessage(0x0b, []byte{0, 0, 0, 0, 0, 0, 0, 0})
+		case <-app.ctx.Done():
 			break
 		}
 	}
 	ticker.Stop()
 }
 
-func reader(ctx context.Context, conn net.Conn) {
+func (app *App) reader() {
 	buf := make([]byte, 4096)
-	for ctx.Err() == nil {
-		n, err := conn.Read(buf)
+	for app.ctx.Err() == nil {
+		n, err := app.conn.Read(buf)
 		if err != nil {
 			continue
 		}
+		app.lastData = time.Now()
 		msg := make([]byte, n)
 		copy(msg, buf[:n])
-		if err := printMessage(msg); err != nil {
+		if err := app.processMessage(msg); err != nil {
 			fmt.Println(err)
+			continue
 		}
+		app.redraw()
 	}
 }
 
-func printMessage(msg []byte) error {
-	if len(msg) < 3 || len(msg)-4 != int(msg[2]) {
-		return fmt.Errorf("invalid lenght")
+func (app *App) Run() {
+	var err error
+
+	app.g, err = gocui.NewGui(gocui.OutputNormal)
+	if err != nil {
+		log.Panicln(err)
+	}
+	defer app.g.Close()
+
+	app.g.SetManagerFunc(app.layout)
+
+	if err := app.g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, app.quit); err != nil {
+		log.Panicln(err)
 	}
 
-	var csum byte
-	for _, c := range msg[1 : len(msg)-1] {
-		csum ^= c
-	}
+	app.ctx, app.cancel = context.WithCancel(context.Background())
 
-	if csum != msg[len(msg)-1] {
-		return fmt.Errorf("invalid checksum: %.2x %.2x", csum, msg[len(msg)-1])
-	}
-
-	switch msg[1] {
-	case 0x8b:
-		//roll := float64(int16(binary.LittleEndian.Uint16(msg[3:5]))) / 100
-		//pitch := float64(int16(binary.LittleEndian.Uint16(msg[5:7]))) / 100
-		//yaw := float64(int16(binary.LittleEndian.Uint16(msg[7:9]))) / 100
-		//fmt.Printf("roll: %.2f pitch %.2f yaw %.2f\n", roll, pitch, yaw)
-		//for _, x := range msg[9 : len(msg)-1] {
-		//	fmt.Printf("%.2x ", x)
-		//}
-		//fmt.Println()
-	case 0x8c:
-		lon := float64(int32(binary.LittleEndian.Uint32(msg[3:7]))) / 10000000
-		lat := float64(int32(binary.LittleEndian.Uint32(msg[7:11]))) / 10000000
-		fmt.Printf("lat %.5f lon %.5f\n", lat, lon)
-		for _, x := range msg[11 : len(msg)-1] {
-			fmt.Printf("%.2x ", x)
-		}
-		fmt.Println()
-	case 0x8f:
-		em := msg[3]
-		fmt.Printf("em: %d\n", em)
-		for _, x := range msg[4 : len(msg)-1] {
-			fmt.Printf("%.2x ", x)
-		}
-		fmt.Println()
-	case 0xfe:
-		s := string(msg[3 : len(msg)-2])
-		fmt.Printf("ver: %s\n", s)
-	default:
-		fmt.Printf("new message %.2x\n", msg[1])
-		for _, x := range msg {
-			fmt.Printf("%.2x ", x)
-		}
-		fmt.Println()
-	}
-
-	return nil
-}
-
-func createMessage(code byte, data []byte) []byte {
-	res := make([]byte, len(data)+4)
-	res[0] = 0x68
-	res[1] = code
-	res[2] = byte(len(data))
-	for i, c := range data {
-		res[i+3] = c
-	}
-	var csum byte
-	for _, c := range res[1 : len(res)-1] {
-		csum ^= c
-	}
-	res[len(res)-1] = csum
-	return res
-}
-
-func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	conn, err := net.Dial("udp", "192.168.0.1:50000")
+	app.conn, err = net.Dial("udp", "192.168.0.1:50000")
 	if err != nil {
 		panic(err)
 	}
 
-	ch := make(chan []byte, 10)
-
 	//go sender4(ctx)
-	go sender5(ctx, conn, ch)
+	go app.sender5()
 
-	ch <- createMessage(0x0b, []byte{0, 0, 0, 0, 0, 0, 0, 0})
-	go pinger(ctx, ch)
-	go reader(ctx, conn)
+	app.commandCh <- createMessage(0x0b, []byte{0, 0, 0, 0, 0, 0, 0, 0})
+	go app.pinger()
+	go app.reader()
 
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
-	<-c
-	cancel()
+	if err := app.g.MainLoop(); err != nil && err != gocui.ErrQuit {
+		log.Panicln(err)
+	}
+
+	app.g.Close()
+}
+
+func (app *App) quit(g *gocui.Gui, v *gocui.View) error {
+	if app.cancel != nil {
+		app.cancel()
+	}
+
+	return gocui.ErrQuit
+}
+
+func main() {
+	NewApp().Run()
 }

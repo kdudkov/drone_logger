@@ -12,13 +12,6 @@ var msgs = []string{
 	"\x58\xfe\x19\x48\x46\x2d\x58\x4c\x2d\x58\x4c\x30\x31\x32\x53\x30\x31\x31\x2e\x30\x32\x31\x2e\x31\x32\x32\x32\x05\x8c",
 }
 
-func TestDecode(t *testing.T) {
-	for _, m := range msgs {
-		printMessage([]byte(m))
-	}
-
-}
-
 func TestCreateMessage(t *testing.T) {
 	msg := createMessage(0x0b, []byte{0, 0, 0, 0, 0, 0, 0, 0})
 

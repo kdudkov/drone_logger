@@ -26,12 +26,13 @@
 * 17 `6a` checksum
 
 ## 0x8f
-`58 8f 08 c0 f00c0000010000 ba`
+`58 8f 08 c0 f00c 0000010000 ba`
 * 1 `58` header
 * 2 `8f` message type
 * 3 `08` payload len
 * 4 `c0` electromagnetic field
-* 5-11 `f00c0000010000` - ?
+* 5-6 `f00c` battery voltage * 400
+* 7-11 `0000010000` - ?
 * 12 `ba` checksum
 
 ## 0xfe - some text
