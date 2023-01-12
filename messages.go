@@ -22,20 +22,6 @@ func createMessage(code byte, data []byte) []byte {
 	return res
 }
 
-func createRcCommand(lr, fb, th, turn, command byte) []byte {
-	res := make([]byte, 8)
-	res[0] = 0x66
-	res[1] = lr
-	res[2] = fb
-	res[3] = th
-	res[4] = turn
-	res[5] = command
-	res[6] = lr ^ fb ^ th ^ turn
-	res[7] = 0x99
-
-	return res
-}
-
 func (app *App) processMessage(msg []byte) error {
 	if len(msg) < 3 || len(msg)-4 != int(msg[2]) {
 		return fmt.Errorf("invalid lenght")

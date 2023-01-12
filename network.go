@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const idleTimeout = time.Second * 3
+
 func periodical(ctx context.Context, t time.Duration, f func()) {
 	ticker := time.NewTicker(t)
 	for ctx.Err() == nil {
@@ -44,7 +46,11 @@ func (app *App) sender5() {
 	for {
 		select {
 		case data := <-app.commandCh:
-			if _, err := app.conn.Write(data); err != nil {
+			conn := app.conn.Load()
+			if conn == nil {
+				continue
+			}
+			if _, err := conn.Write(data); err != nil {
 				app.logger.AddLine(err.Error())
 			}
 		case <-app.ctx.Done():
@@ -54,22 +60,27 @@ func (app *App) sender5() {
 }
 
 func (app *App) pinger() {
-	ping := createMessage(0x0b, []byte{0, 0, 0, 0, 0, 0, 0, 0})
+	ping := createMessage(0x0b, make([]byte, 8))
 	app.commandCh <- ping
 	periodical(app.ctx, time.Second*3, func() {
 		app.commandCh <- ping
+		app.commandCh <- createMessage(0xa, make([]byte, 15))
 	})
 }
 
 func (app *App) reader() {
 	buf := make([]byte, 4096)
 	for app.ctx.Err() == nil {
-		n, err := app.conn.Read(buf)
+		conn := app.conn.Load()
+		if conn == nil {
+			continue
+		}
+		n, err := conn.Read(buf)
 		if err != nil {
 			app.logger.AddLine(err.Error())
 			continue
 		}
-		app.lastData = time.Now()
+		app.setActivity()
 		msg := make([]byte, n)
 		copy(msg, buf[:n])
 		if err := app.processMessage(msg); err != nil {
@@ -78,4 +89,46 @@ func (app *App) reader() {
 		}
 		app.redraw()
 	}
+}
+
+func (app *App) startConn() {
+	conn, err := dial("192.168.0.1:5000")
+	if err != nil {
+		app.logger.AddLine(err.Error())
+	}
+	if old := app.conn.Swap(conn); old != nil {
+		old.Close()
+	}
+	if app.closeTimer == nil {
+		app.closeTimer = time.AfterFunc(idleTimeout, app.closeIdle)
+	} else {
+		app.closeTimer.Reset(idleTimeout)
+	}
+}
+
+func (app *App) setActivity() {
+	app.lastData = time.Now()
+
+	if app.closeTimer == nil {
+		app.closeTimer = time.AfterFunc(idleTimeout, app.closeIdle)
+	} else {
+		app.closeTimer.Reset(idleTimeout)
+	}
+}
+
+func (app *App) closeIdle() {
+	idle := time.Now().Sub(app.lastData)
+
+	if idle >= idleTimeout {
+		app.logger.AddLine("no data, reconnect")
+		app.startConn()
+	}
+}
+
+func dial(addr string) (*net.UDPConn, error) {
+	a, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		return nil, err
+	}
+	return net.DialUDP("udp", nil, a)
 }

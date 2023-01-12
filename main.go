@@ -7,26 +7,29 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jroimartin/gocui"
 )
 
 type App struct {
-	g         *gocui.Gui
-	commandCh chan []byte
-	conn      net.Conn
-	ctx       context.Context
-	cancel    context.CancelFunc
-	lastData  time.Time
-	data      sync.Map
-	info      *DroneInfo
-	logger    *Logger
+	g          *gocui.Gui
+	commandCh  chan []byte
+	conn       atomic.Pointer[net.UDPConn]
+	ctx        context.Context
+	cancel     context.CancelFunc
+	lastData   time.Time
+	data       sync.Map
+	info       *DroneInfo
+	logger     *Logger
+	closeTimer *time.Timer
 }
 
 func NewApp() *App {
 	app := &App{
 		commandCh: make(chan []byte, 10),
+		conn:      atomic.Pointer[net.UDPConn]{},
 		data:      sync.Map{},
 		info:      &DroneInfo{info: sync.Map{}},
 		logger:    NewLogger(),
@@ -120,10 +123,14 @@ func (app *App) Run() {
 	if err := app.g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, app.quit); err != nil {
 		panic(err)
 	}
+	if err := app.g.SetKeybinding("", 'w', gocui.ModNone, app.forward); err != nil {
+		panic(err)
+	}
 
 	app.ctx, app.cancel = context.WithCancel(context.Background())
 
-	app.conn, err = net.Dial("udp", "192.168.0.1:50000")
+	app.startConn()
+
 	if err != nil {
 		panic(err)
 	}
@@ -147,6 +154,12 @@ func (app *App) quit(g *gocui.Gui, v *gocui.View) error {
 	}
 
 	return gocui.ErrQuit
+}
+
+func (app *App) forward(g *gocui.Gui, v *gocui.View) error {
+	app.logger.AddLine("send command forward")
+
+	return nil
 }
 
 func main() {
