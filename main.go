@@ -13,6 +13,12 @@ import (
 	"github.com/jroimartin/gocui"
 )
 
+var known = map[int]string{
+	0xb:  "11111100000000",
+	0xc:  "1111111100000",
+	0x8f: "11100000",
+}
+
 type App struct {
 	g          *gocui.Gui
 	commandCh  chan []byte
@@ -70,7 +76,10 @@ func (app *App) redraw() {
 				formatGyro(app.info.getFloat("roll")),
 				formatGyro(app.info.getFloat("pitch")),
 				formatGyro(app.info.getFloat("yaw")))
+			fmt.Fprintf(v, "hs: %f\n", app.info.getFloat("hs"))
 			fmt.Fprintf(v, "em: %d battery: %.2fv\n", app.info.getByte("em"), app.info.getFloat("battery"))
+			fmt.Fprintf(v, "sat: %d, s1: %d s2:%d\n", app.info.getByte("sat"), app.info.getByte("s1"), app.info.getByte("s2"))
+			fmt.Fprintf(v, "f1: %d f2: %d", app.info.getByte("f1"), app.info.getByte("f2"))
 		}
 		if v, err := gui.View("data"); err == nil {
 			v.Clear()

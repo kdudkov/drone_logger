@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const idleTimeout = time.Second * 3
+const idleTimeout = time.Second * 5
 
 func periodical(ctx context.Context, t time.Duration, f func()) {
 	ticker := time.NewTicker(t)
@@ -92,7 +92,7 @@ func (app *App) reader() {
 }
 
 func (app *App) startConn() {
-	conn, err := dial("192.168.0.1:5000")
+	conn, err := dial("192.168.0.1:50000")
 	if err != nil {
 		app.logger.AddLine(err.Error())
 	}
