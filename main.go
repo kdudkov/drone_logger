@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -12,12 +13,6 @@ import (
 
 	"github.com/jroimartin/gocui"
 )
-
-var known = map[int]string{
-	0xb:  "11111100000000",
-	0xc:  "1111111100000",
-	0x8f: "11100000",
-}
 
 type App struct {
 	g          *gocui.Gui
@@ -30,6 +25,7 @@ type App struct {
 	info       *DroneInfo
 	logger     *Logger
 	closeTimer *time.Timer
+	logfile    *os.File
 }
 
 func NewApp() *App {
@@ -71,12 +67,12 @@ func (app *App) redraw() {
 	app.g.Update(func(gui *gocui.Gui) error {
 		if v, err := gui.View("info"); err == nil {
 			v.Clear()
-			fmt.Fprintf(v, "lat: %.6f lon: %.6f\n", app.info.getFloat("lat"), app.info.getFloat("lon"))
+			fmt.Fprintf(v, "lat: %.7f lon: %.7f\n", app.info.getFloat("lat"), app.info.getFloat("lon"))
 			fmt.Fprintf(v, "roll: %s pitch: %s yaw: %s\n",
 				formatGyro(app.info.getFloat("roll")),
 				formatGyro(app.info.getFloat("pitch")),
 				formatGyro(app.info.getFloat("yaw")))
-			fmt.Fprintf(v, "hs: %f\n", app.info.getFloat("hs"))
+			fmt.Fprintf(v, "alt: %.2f dist %.2f\n", app.info.getFloat("alt"), app.info.getFloat("dist"))
 			fmt.Fprintf(v, "em: %d battery: %.2fv\n", app.info.getByte("em"), app.info.getFloat("battery"))
 			fmt.Fprintf(v, "sat: %d, s1: %d s2:%d\n", app.info.getByte("sat"), app.info.getByte("s1"), app.info.getByte("s2"))
 			fmt.Fprintf(v, "f1: %d f2: %d", app.info.getByte("f1"), app.info.getByte("f2"))
@@ -132,9 +128,19 @@ func (app *App) Run() {
 	if err := app.g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, app.quit); err != nil {
 		panic(err)
 	}
-	if err := app.g.SetKeybinding("", 'w', gocui.ModNone, app.forward); err != nil {
+	if err := app.g.SetKeybinding("", 'w', gocui.ModNone, app.up); err != nil {
 		panic(err)
 	}
+	if err := app.g.SetKeybinding("", 's', gocui.ModNone, app.down); err != nil {
+		panic(err)
+	}
+
+	fname := time.Now().Format("20060102_150405.log")
+	app.logfile, err = os.Create(fname)
+	if err != nil {
+		panic(err)
+	}
+	defer app.logfile.Close()
 
 	app.ctx, app.cancel = context.WithCancel(context.Background())
 
@@ -165,8 +171,14 @@ func (app *App) quit(g *gocui.Gui, v *gocui.View) error {
 	return gocui.ErrQuit
 }
 
-func (app *App) forward(g *gocui.Gui, v *gocui.View) error {
-	app.logger.AddLine("send command forward")
+func (app *App) up(g *gocui.Gui, v *gocui.View) error {
+	app.commandCh <- NewCommandBuilder().Up(127).build()
+
+	return nil
+}
+
+func (app *App) down(g *gocui.Gui, v *gocui.View) error {
+	app.commandCh <- NewCommandBuilder().Down(127).build()
 
 	return nil
 }

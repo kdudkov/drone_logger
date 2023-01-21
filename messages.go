@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+	"time"
 )
 
 func createMessage(code byte, data []byte) []byte {
@@ -42,18 +43,28 @@ func (app *App) processMessage(msg []byte) error {
 	le := binary.LittleEndian
 
 	switch msg[1] {
-	case 0x8b:
+	case 0x8b: // 14: 3900 f300 7e3d fb00290000 00 0007
 		app.info.put("roll", float64(int16(le.Uint16(data[0:2])))/100)
 		app.info.put("pitch", float64(int16(le.Uint16(data[2:4])))/100)
 		app.info.put("yaw", float64(int16(le.Uint16(data[4:6])))/100)
 		app.info.put("sat", (data[11]&0x7c)>>2)
 		app.info.put("s1", (data[11]&0x80)>>7)
 		app.info.put("s2", data[11]&3)
-	case 0x8c:
+	case 0x8c: // 13: 00000000 00000000 e803 0000 00
 		app.info.put("lon", float64(int32(le.Uint32(data[0:4])))/10000000)
 		app.info.put("lat", float64(int32(le.Uint32(data[4:8])))/10000000)
-		app.info.put("hs", float64(int8(data[10]))/10)
-	case 0x8f:
+		app.info.put("alt", float64(int16(le.Uint16(data[8:10])))/10-100)
+		app.info.put("dist", float64(int16(le.Uint16(data[10:12])))/10)
+
+		if app.info.getFloat("lat") != 0 && app.info.getFloat("lon") != 0 {
+			app.logfile.WriteString(fmt.Sprintf("%s;%.7f;%.7f;%.1f\n",
+				time.Now().Format(time.RFC3339),
+				app.info.getFloat("lat"),
+				app.info.getFloat("lon"),
+				app.info.getFloat("alt"),
+			))
+		}
+	case 0x8f: // 8: c0 f00c 0000010000
 		app.info.put("em", data[0])
 		app.info.put("battery", float64((le.Uint16(data[1:3])&0x3ffc)>>2)/100)
 		app.info.put("f1", data[1]&0xc0>>6)
