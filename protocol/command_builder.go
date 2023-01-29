@@ -1,4 +1,4 @@
-package main
+package protocol
 
 type CommandBuilder struct {
 	lr, fb, ud, rot, cmd, gimbal byte
@@ -85,7 +85,7 @@ func (cb *CommandBuilder) Ccw(v byte) *CommandBuilder {
 	return cb
 }
 
-func (cb *CommandBuilder) build() []byte {
+func (cb *CommandBuilder) Build() []byte {
 	res := make([]byte, 13)
 	res[0] = cb.lr
 	res[1] = cb.fb

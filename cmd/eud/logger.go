@@ -17,6 +17,12 @@ func NewLogger() *Logger {
 	}
 }
 
+func (l *Logger) Write(p []byte) (n int, err error) {
+	l.AddLine(string(p))
+	n = len(p)
+	return
+}
+
 func (l *Logger) AddLine(s string) {
 	l.mx.Lock()
 

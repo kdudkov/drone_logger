@@ -2,42 +2,45 @@ package main
 
 import (
 	"context"
+	"drone/protocol"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"sort"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jroimartin/gocui"
 )
 
 type App struct {
-	g          *gocui.Gui
-	commandCh  chan []byte
-	conn       atomic.Pointer[net.UDPConn]
-	ctx        context.Context
-	cancel     context.CancelFunc
-	lastData   time.Time
-	data       sync.Map
-	info       *DroneInfo
-	logger     *Logger
-	closeTimer *time.Timer
-	logfile    *os.File
+	g *gocui.Gui
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	data    sync.Map
+	info    *DroneInfo
+	logger  *Logger
+	logfile *os.File
+	drone   protocol.Drone
 }
 
 func NewApp() *App {
 	app := &App{
-		commandCh: make(chan []byte, 10),
-		conn:      atomic.Pointer[net.UDPConn]{},
-		data:      sync.Map{},
-		info:      &DroneInfo{info: sync.Map{}},
-		logger:    NewLogger(),
+		data:   sync.Map{},
+		info:   &DroneInfo{info: sync.Map{}},
+		logger: NewLogger(),
 	}
 	app.logger.cb = app.redraw
+	app.drone = protocol.NewSg907(app.setValue, app.newDataCb)
+	app.drone.SetWriter(app.logger)
 	return app
+}
+
+func (app *App) setValue(key string, val any) {
+	app.data.Store(key, val)
 }
 
 func (app *App) layout(g *gocui.Gui) error {
@@ -71,7 +74,7 @@ func (app *App) redraw() {
 			fmt.Fprintf(v, "roll: %s pitch: %s yaw: %s\n",
 				formatGyro(app.info.getFloat("roll")),
 				formatGyro(app.info.getFloat("pitch")),
-				formatGyro(app.info.getFloat("yaw")))
+				app.info.getFloat("yaw"))
 			fmt.Fprintf(v, "alt: %.2f dist %.2f\n", app.info.getFloat("alt"), app.info.getFloat("dist"))
 			fmt.Fprintf(v, "em: %d battery: %.2fv\n", app.info.getByte("em"), app.info.getFloat("battery"))
 			fmt.Fprintf(v, "sat: %d, s1: %d s2:%d\n", app.info.getByte("sat"), app.info.getByte("s1"), app.info.getByte("s2"))
@@ -144,17 +147,11 @@ func (app *App) Run() {
 
 	app.ctx, app.cancel = context.WithCancel(context.Background())
 
-	app.startConn()
+	app.drone.Start(app.ctx)
 
 	if err != nil {
 		panic(err)
 	}
-
-	//go sender4(ctx)
-	go app.sender5()
-	go app.reader()
-
-	go app.pinger()
 
 	if err := app.g.MainLoop(); err != nil && err != gocui.ErrQuit {
 		log.Panicln(err)
@@ -171,16 +168,39 @@ func (app *App) quit(g *gocui.Gui, v *gocui.View) error {
 	return gocui.ErrQuit
 }
 
+func (app *App) newDataCb(code byte, data []byte) {
+	if app.info.getFloat("lat") != 0 && app.info.getFloat("lon") != 0 {
+		app.logfile.WriteString(fmt.Sprintf("%s;%.7f;%.7f;%.1f\n",
+			time.Now().Format(time.RFC3339),
+			app.info.getFloat("lat"),
+			app.info.getFloat("lon"),
+			app.info.getFloat("alt"),
+		))
+	}
+	app.data.Store(code, data)
+}
+
 func (app *App) up(g *gocui.Gui, v *gocui.View) error {
-	app.commandCh <- NewCommandBuilder().Up(127).build()
+	app.drone.AddCommand(protocol.NewCommandBuilder().Up(127).Build())
 
 	return nil
 }
 
 func (app *App) down(g *gocui.Gui, v *gocui.View) error {
-	app.commandCh <- NewCommandBuilder().Down(127).build()
+	app.drone.AddCommand(protocol.NewCommandBuilder().Down(127).Build())
 
 	return nil
+}
+
+func arr2str(d []byte) string {
+	b := strings.Builder{}
+	for i, c := range d {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString(fmt.Sprintf("%.2x", c))
+	}
+	return b.String()
 }
 
 func main() {
