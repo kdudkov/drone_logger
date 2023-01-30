@@ -29,6 +29,7 @@ func NewSg907(dataAdder func(k string, val any), dataCb func(code byte, data []b
 	return &Sg907{
 		dataAdder: dataAdder,
 		dataCb:    dataCb,
+		commandCh: make(chan []byte, 50),
 	}
 }
 
@@ -108,7 +109,7 @@ func (s *Sg907) sender5() {
 func (s *Sg907) pinger() {
 	ping := createMessage(0x0b, make([]byte, 8))
 	s.commandCh <- ping
-	periodical(s.ctx, time.Second*3, func() {
+	periodical(s.ctx, time.Second, func() {
 		s.commandCh <- ping
 		//s.commandCh <- createMessage(0xa, make([]byte, 15))
 	})

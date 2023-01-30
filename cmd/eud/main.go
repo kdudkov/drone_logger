@@ -40,7 +40,7 @@ func NewApp() *App {
 }
 
 func (app *App) setValue(key string, val any) {
-	app.data.Store(key, val)
+	app.info.put(key, val)
 }
 
 func (app *App) layout(g *gocui.Gui) error {
@@ -71,7 +71,7 @@ func (app *App) redraw() {
 		if v, err := gui.View("info"); err == nil {
 			v.Clear()
 			fmt.Fprintf(v, "lat: %.7f lon: %.7f\n", app.info.getFloat("lat"), app.info.getFloat("lon"))
-			fmt.Fprintf(v, "roll: %s pitch: %s yaw: %s\n",
+			fmt.Fprintf(v, "roll: %s pitch: %s yaw: %f\n",
 				formatGyro(app.info.getFloat("roll")),
 				formatGyro(app.info.getFloat("pitch")),
 				app.info.getFloat("yaw"))
@@ -178,6 +178,7 @@ func (app *App) newDataCb(code byte, data []byte) {
 		))
 	}
 	app.data.Store(code, data)
+	app.redraw()
 }
 
 func (app *App) up(g *gocui.Gui, v *gocui.View) error {
