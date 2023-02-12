@@ -29,6 +29,7 @@ func (d *DroneInfo) getByte(key string) byte {
 
 	return 0
 }
+
 func (d *DroneInfo) getInt(key string) int {
 	if v, ok := d.info.Load(key); ok {
 		if vv, ok2 := v.(int); ok2 {
@@ -37,6 +38,16 @@ func (d *DroneInfo) getInt(key string) int {
 	}
 
 	return 0
+}
+
+func (d *DroneInfo) getBool(key string) bool {
+	if v, ok := d.info.Load(key); ok {
+		if vv, ok2 := v.(bool); ok2 {
+			return vv
+		}
+	}
+
+	return false
 }
 
 func (d *DroneInfo) put(key string, v any) {

@@ -77,8 +77,24 @@ func (app *App) redraw() {
 				app.info.getFloat("yaw"))
 			fmt.Fprintf(v, "alt: %.2f dist %.2f\n", app.info.getFloat("alt"), app.info.getFloat("dist"))
 			fmt.Fprintf(v, "em: %d battery: %.2fv\n", app.info.getByte("em"), app.info.getFloat("battery"))
-			fmt.Fprintf(v, "sat: %d, s1: %d s2:%d\n", app.info.getByte("sat"), app.info.getByte("s1"), app.info.getByte("s2"))
-			fmt.Fprintf(v, "f1: %d f2: %d", app.info.getByte("f1"), app.info.getByte("f2"))
+			fmt.Fprintf(v, "sat: %d, ok: %v\n", app.info.getByte("sat"), app.info.getBool("sat_good"))
+			fmt.Fprintf(v, "\n\n")
+			m := make(map[string]any)
+			keys := make([]string, 0)
+			app.info.info.Range(func(key, value any) bool {
+				keys = append(keys, key.(string))
+				m[key.(string)] = value
+				return true
+			})
+			sort.Strings(keys)
+			i := 0
+			for _, k := range keys {
+				fmt.Fprintf(v, "%s: %v ", k, m[k])
+				i++
+				if i%4 == 0 {
+					fmt.Fprintf(v, "\n")
+				}
+			}
 		}
 		if v, err := gui.View("data"); err == nil {
 			v.Clear()

@@ -107,11 +107,13 @@ func (s *Sg907) sender5() {
 }
 
 func (s *Sg907) pinger() {
+	s.commandCh <- createMessage(0x7e, str2byte("48462d58582d5858585858583030302e3030302e30303030000000000000"))
+	s.commandCh <- createMessage(0xa, make([]byte, 15))
 	ping := createMessage(0x0b, make([]byte, 8))
 	s.commandCh <- ping
+
 	periodical(s.ctx, time.Second, func() {
 		s.commandCh <- ping
-		//s.commandCh <- createMessage(0xa, make([]byte, 15))
 	})
 }
 
@@ -201,21 +203,39 @@ func (s *Sg907) processMessage(msg []byte) error {
 		s.dataAdder("roll", float64(int16(le.Uint16(data[0:2])))/100)
 		s.dataAdder("pitch", float64(int16(le.Uint16(data[2:4])))/100)
 		s.dataAdder("yaw", float64(int16(le.Uint16(data[4:6])))/100)
+		s.dataAdder("locked", data[9]&(1<<3) == 0)
+		s.dataAdder("in_air", data[9]&(1<<4) > 0)
+		if data[9]&(1<<5) > 0 {
+			s.dataAdder("state", "returning")
+		}
+		if data[9]&(1<<7) > 0 {
+			s.dataAdder("state", "route")
+		}
 		s.dataAdder("sat", (data[11]&0x7c)>>2)
-		s.dataAdder("s1", (data[11]&0x80)>>7)
-		s.dataAdder("s2", data[11]&3)
+		s.dataAdder("sat_good", data[11]&128 > 0)
+		if data[11]&1 > 0 {
+			s.dataAdder("state", "landing")
+		}
+		if len(data) > 13 {
+			s.dataAdder("hi_speed", data[13]&2 > 0)
+			s.dataAdder("remote", data[13]&4 == 0)
+		}
+
 	case 0x8c: // 13: 00000000 00000000 e803 0000 00
 		s.dataAdder("lon", float64(int32(le.Uint32(data[0:4])))/10000000)
 		s.dataAdder("lat", float64(int32(le.Uint32(data[4:8])))/10000000)
 		s.dataAdder("alt", float64(int16(le.Uint16(data[8:10])))/10-100)
-		s.dataAdder("dist", float64(int16(le.Uint16(data[10:12])))/10)
+		s.dataAdder("dist", float64(int16(le.Uint16(data[10:12])))*1.6)
+		if len(data) > 12 {
+			s.dataAdder("vsp", -float64(int16(data[12]))/10)
+		}
 	case 0x8f: // 8: c0 f00c 0000010000
-		s.dataAdder("em", data[0])
+		s.dataAdder("em", int(data[0])+int((data[1]&0xc0)>>6)*256)
 		s.dataAdder("battery", float64((le.Uint16(data[1:3])&0x3ffc)>>2)/100)
-		s.dataAdder("f1", data[1]&0xc0>>6)
-		s.dataAdder("f2", data[1]&3)
+		s.dataAdder("optical", data[4]&1 > 0)
+		s.dataAdder("dist2", le.Uint16(data[5:7])>>1)
 	case 0xfe:
-		s.dataAdder("ver", string(data))
+		s.dataAdder("version", string(data))
 	}
 	// c8 - 18 cc - 19 c4 - 17
 
