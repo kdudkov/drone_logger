@@ -18,12 +18,16 @@ type App struct {
 }
 
 type Data struct {
-	roll, pitch, yaw   float64
-	sats               byte
-	lat, lon           float64
-	alt, dist          float32
-	hsp, vsp           float32
-	locked, air, route bool
+	roll, pitch, yaw float64
+	sats             byte
+	lat, lon         float64
+	alt, dist        float32
+	hsp, vsp         float32
+	locked           bool
+	inAir            bool
+	route            bool
+	landing          bool
+	hiSpeed          bool
 }
 
 func NewApp() *App {
@@ -38,11 +42,11 @@ func NewApp() *App {
 			sats:   14,
 			lat:    59.932970,
 			lon:    30.234677,
-			alt:    20,
+			alt:    0,
 			dist:   416,
 			vsp:    0,
 			locked: true,
-			air:    true,
+			inAir:  false,
 		},
 	}
 }

@@ -204,7 +204,13 @@ func (s *Sg907) processMessage(msg []byte) error {
 		s.dataAdder("pitch", float64(int16(le.Uint16(data[2:4])))/100)
 		s.dataAdder("yaw", float64(int16(le.Uint16(data[4:6])))/100)
 		s.dataAdder("locked", data[9]&(1<<3) == 0)
-		s.dataAdder("in_air", data[9]&(1<<4) > 0)
+		inair := data[9]&(1<<4) > 0
+		s.dataAdder("in_air", inair)
+		if !inair {
+			s.dataAdder("state", "ground")
+		} else {
+			s.dataAdder("state", "air")
+		}
 		if data[9]&(1<<5) > 0 {
 			s.dataAdder("state", "returning")
 		}

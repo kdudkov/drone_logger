@@ -69,24 +69,31 @@ func (app *App) ListenUDP() error {
 			// ping
 			fmt.Printf("01: %s\n", arr2str(data))
 			if data[6]&4 > 0 {
-				fmt.Println("cmd lock/unlock")
 				app.WriteData(func(d *Data) {
 					d.locked = !d.locked
+					fmt.Printf("cmd lock/unlock, locked: %v\n", d.locked)
 				})
 			}
 
-			if data[6]&16 > 0 && app.data.air {
+			if data[6]&16 > 0 && app.data.inAir {
 				fmt.Println("cmd land")
 				app.WriteData(func(d *Data) {
-					d.air = false
-					d.alt = 0
+					d.landing = true
+				})
+				time.AfterFunc(time.Second*5, func() {
+					app.WriteData(func(d *Data) {
+						d.landing = false
+						d.inAir = false
+						d.locked = false
+						d.alt = 0
+					})
 				})
 			}
 
-			if data[6]&8 > 0 && !app.data.air {
+			if data[6]&8 > 0 && !app.data.inAir {
 				fmt.Println("cmd takeoff")
 				app.WriteData(func(d *Data) {
-					d.air = true
+					d.inAir = true
 					d.locked = true
 					d.alt = 2
 				})
@@ -96,6 +103,18 @@ func (app *App) ListenUDP() error {
 				app.WriteData(func(d *Data) {
 					d.yaw -= float64(int(c)-0x80) / 40
 					fmt.Printf("yaw: %.2f\n", d.yaw)
+				})
+			}
+
+			if data[5] == 0x18 {
+				app.WriteData(func(d *Data) {
+					d.hiSpeed = true
+				})
+			}
+
+			if data[5] == 8 {
+				app.WriteData(func(d *Data) {
+					d.hiSpeed = false
 				})
 			}
 

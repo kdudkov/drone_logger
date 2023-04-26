@@ -4,6 +4,7 @@ import (
 	"context"
 	"drone/protocol"
 	"fmt"
+
 	"log"
 	"os"
 	"sort"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/jroimartin/gocui"
+
+	"github.com/kdudkov/lwdrone/msg"
 )
 
 type App struct {
@@ -25,14 +28,24 @@ type App struct {
 	logger  *Logger
 	logfile *os.File
 	drone   protocol.Drone
+
+	onseCreate *sync.Once
+
+	lw *msg.Lwdrone
 }
 
 func NewApp() *App {
 	app := &App{
-		data:   sync.Map{},
-		info:   &DroneInfo{info: sync.Map{}},
-		logger: NewLogger(),
+		data:       sync.Map{},
+		info:       &DroneInfo{info: sync.Map{}},
+		logger:     NewLogger(),
+		onseCreate: new(sync.Once),
+		lw:         msg.NewDrone(),
 	}
+	if err := app.lw.SetTime(); err != nil {
+		panic(err)
+	}
+
 	app.logger.cb = app.redraw
 	app.drone = protocol.NewSg907(app.setValue, app.newDataCb)
 	app.drone.SetWriter(app.logger)
@@ -75,7 +88,7 @@ func (app *App) redraw() {
 				formatGyro(app.info.getFloat("roll")),
 				formatGyro(app.info.getFloat("pitch")),
 				app.info.getFloat("yaw"))
-			fmt.Fprintf(v, "alt: %.2f dist %.2f\n", app.info.getFloat("alt"), app.info.getFloat("dist"))
+			fmt.Fprintf(v, "alt: %.1f dist %.1f\n", app.info.getFloat("alt"), app.info.getFloat("dist"))
 			fmt.Fprintf(v, "em: %d battery: %.2fv\n", app.info.getByte("em"), app.info.getFloat("battery"))
 			fmt.Fprintf(v, "sat: %d, ok: %v\n", app.info.getByte("sat"), app.info.getBool("sat_good"))
 			fmt.Fprintf(v, "\n\n")
@@ -153,9 +166,10 @@ func (app *App) Run() {
 	if err := app.g.SetKeybinding("", 's', gocui.ModNone, app.down); err != nil {
 		panic(err)
 	}
+	if err := app.g.SetKeybinding("", 'p', gocui.ModNone, app.photo); err != nil {
+		panic(err)
+	}
 
-	fname := time.Now().Format("20060102_150405.log")
-	app.logfile, err = os.Create(fname)
 	if err != nil {
 		panic(err)
 	}
@@ -186,12 +200,23 @@ func (app *App) quit(g *gocui.Gui, v *gocui.View) error {
 
 func (app *App) newDataCb(code byte, data []byte) {
 	if app.info.getFloat("lat") != 0 && app.info.getFloat("lon") != 0 {
-		app.logfile.WriteString(fmt.Sprintf("%s;%.7f;%.7f;%.1f\n",
-			time.Now().Format(time.RFC3339),
-			app.info.getFloat("lat"),
-			app.info.getFloat("lon"),
-			app.info.getFloat("alt"),
-		))
+		app.onseCreate.Do(func() {
+			var err error
+			fname := time.Now().Format("20060102_150405.log")
+			app.logfile, err = os.Create(fname)
+			if err != nil {
+				fmt.Println(err)
+				app.logfile = nil
+			}
+		})
+		if app.logfile != nil {
+			_, _ = app.logfile.WriteString(fmt.Sprintf("%s;%.7f;%.7f;%.1f\n",
+				time.Now().Format(time.RFC3339),
+				app.info.getFloat("lat"),
+				app.info.getFloat("lon"),
+				app.info.getFloat("alt"),
+			))
+		}
 	}
 	app.data.Store(code, data)
 	app.redraw()
@@ -206,6 +231,40 @@ func (app *App) up(g *gocui.Gui, v *gocui.View) error {
 func (app *App) down(g *gocui.Gui, v *gocui.View) error {
 	app.drone.AddCommand(protocol.NewCommandBuilder().Down(127).Build())
 
+	return nil
+}
+
+func (app *App) photo(g *gocui.Gui, v *gocui.View) error {
+	go func() {
+		p, err := app.lw.TakePicture()
+		if err != nil {
+			app.logger.AddLine(fmt.Sprintf("error: %s\n", err.Error()))
+			return
+		}
+		fname := time.Now().Format("20060102_150405.jpg")
+		f, err := os.Create(fname)
+		if err != nil {
+			app.logger.AddLine(err.Error())
+			return
+		}
+		_, _ = f.Write(p.Data)
+		f.Close()
+		app.logger.AddLine("photo saved")
+
+		ff, err := os.OpenFile("geo.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+
+		if err != nil {
+			app.logger.AddLine(fmt.Sprintf("error: %s\n", err.Error()))
+			return
+		}
+
+		ff.WriteString(fmt.Sprintf("%s\t%.7f\t%.7f\t%.1f\n",
+			fname,
+			app.info.getFloat("lat"),
+			app.info.getFloat("lon"),
+			app.info.getFloat("alt")))
+		ff.Close()
+	}()
 	return nil
 }
 

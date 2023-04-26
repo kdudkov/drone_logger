@@ -150,11 +150,7 @@ func (app *App) commandSession(conn *net.TCPConn) {
 			return
 		}
 
-		if cmd.GetCode() == msg.CmdHeartbeat && len(cmd.GetBody()) > 0 {
-
-		}
-
-		fmt.Printf("cmd: %d\n", cmd.GetCode())
+		fmt.Println(cmd)
 		ans := msg.NewCommand(cmd.GetCode(), nil)
 		conn.Write(ans.ToByte())
 	}

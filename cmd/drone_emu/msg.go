@@ -19,11 +19,11 @@ func (app *App) makeGyro() []byte {
 	dat[7] = app.n
 	dat[8] = 0 // ? - lo-power alarm
 
-	dat[9] = 0 //  4 - locked  5 - air/ground 6 - returning 7 - right icons 8 - in route
+	dat[9] = 0 //  4 - locked  5 - inAir/ground 6 - returning 7 - right icons 8 - in route
 	if !app.data.locked {
 		dat[9] |= 1 << 3
 	}
-	if app.data.air {
+	if app.data.inAir {
 		dat[9] |= 1 << 4
 	}
 	if app.data.route {
@@ -35,10 +35,17 @@ func (app *App) makeGyro() []byte {
 		dat[11] |= 1 << 7
 	}
 
+	if app.data.landing {
+		dat[11] |= 1
+	}
+
 	dat[10] = app.n
 	dat[12] = app.n
 
-	dat[13] = 3 //  2 - 50/100%  3 - remote off
+	dat[13] = 1 //  2 - 50/100%  3 - remote off
+	if app.data.hiSpeed {
+		dat[13] |= 2
+	}
 
 	//fmt.Println(app.n)
 	app.n++
