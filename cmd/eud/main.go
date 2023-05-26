@@ -83,6 +83,8 @@ func (app *App) redraw() {
 	app.g.Update(func(gui *gocui.Gui) error {
 		if v, err := gui.View("info"); err == nil {
 			v.Clear()
+			fmt.Fprintf(v, "state: %s\n", app.info.getString("state"))
+			fmt.Fprintf(v, "sat: %d, ok: %v\n", app.info.getByte("sat"), app.info.getBool("sat_good"))
 			fmt.Fprintf(v, "lat: %.7f lon: %.7f\n", app.info.getFloat("lat"), app.info.getFloat("lon"))
 			fmt.Fprintf(v, "roll: %s pitch: %s yaw: %f\n",
 				formatGyro(app.info.getFloat("roll")),
@@ -90,7 +92,6 @@ func (app *App) redraw() {
 				app.info.getFloat("yaw"))
 			fmt.Fprintf(v, "alt: %.1f dist %.1f\n", app.info.getFloat("alt"), app.info.getFloat("dist"))
 			fmt.Fprintf(v, "em: %d battery: %.2fv\n", app.info.getByte("em"), app.info.getFloat("battery"))
-			fmt.Fprintf(v, "sat: %d, ok: %v\n", app.info.getByte("sat"), app.info.getBool("sat_good"))
 			fmt.Fprintf(v, "\n\n")
 			m := make(map[string]any)
 			keys := make([]string, 0)

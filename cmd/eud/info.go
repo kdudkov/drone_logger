@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -8,6 +9,14 @@ import (
 type DroneInfo struct {
 	info    sync.Map
 	updated time.Time
+}
+
+func (d *DroneInfo) getString(key string) string {
+	if v, ok := d.info.Load(key); ok {
+		return fmt.Sprintf("%v", v)
+	}
+
+	return ""
 }
 
 func (d *DroneInfo) getFloat(key string) float64 {
