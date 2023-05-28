@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/jroimartin/gocui v0.5.0
-	github.com/kdudkov/lwdrone v0.0.0-20230201144054-7e577f5dedcc
+	github.com/kdudkov/lwdrone v0.0.0-20230528142957-bc7b98a029e7
 )
 
 require (
