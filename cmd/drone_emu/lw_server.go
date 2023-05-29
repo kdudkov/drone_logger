@@ -79,7 +79,7 @@ func (s *Streamer) reader() {
 			continue
 		}
 
-		ans := msg.NewCommand(cmd.GetCode(), nil)
+		ans := msg.NewCommand(int(cmd.GetCode()), nil)
 		s.ch <- ans
 	}
 }
@@ -151,7 +151,7 @@ func (app *App) commandSession(conn *net.TCPConn) {
 		}
 
 		fmt.Println(cmd)
-		ans := msg.NewCommand(cmd.GetCode(), nil)
+		ans := msg.NewCommand(int(cmd.GetCode()), nil)
 		conn.Write(ans.ToByte())
 	}
 }
