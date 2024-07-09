@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"encoding/hex"
 	"io"
 	"net"
 	"os"
@@ -164,7 +165,7 @@ func (s *Sg907) reader50k(ctx context.Context) {
 		s.setActivity(true)
 
 		if s.logAll {
-
+			s.logFile.Write([]byte(hex.EncodeToString(buf[:n]) + "\n"))
 		}
 
 		m := &Message{}
