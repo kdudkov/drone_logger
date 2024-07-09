@@ -68,5 +68,5 @@ func (d *DroneInfo) getBool(key string) bool {
 
 func (d *DroneInfo) put(key string, v any) {
 	d.info.Store(key, v)
-	d.info.Store(key, time.Now())
+	d.ts.Store(key, time.Now())
 }
