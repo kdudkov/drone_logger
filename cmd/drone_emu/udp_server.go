@@ -1,204 +1,190 @@
 package main
 
 import (
+	"drone/pkg/protocol"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net"
-	"strings"
 	"time"
 )
 
-func (app *App) ResetConn() {
+func (app *App) Reconnect() {
 	addr, _ := net.ResolveUDPAddr("udp", ":50000")
-	conn, err := net.ListenUDP("udp", addr)
+	conn, err := net.ListenUDP("udp4", addr)
 
 	if err != nil {
+		app.logger.Error("error", slog.Any("error", err))
 		panic(err)
 	}
 
-	if old := app.conn.Swap(conn); old != nil {
-		old.Close()
-	}
+	app.logger.Info("start listening :50000")
+	app.conn = conn
 }
 
 func (app *App) ListenUDP() error {
-	app.ResetConn()
+	app.Reconnect()
 	buf := make([]byte, 65535)
 
 	for {
-		conn := app.conn.Load()
-		if conn == nil {
-			continue
-		}
-		n, addr, err := conn.ReadFrom(buf)
+		n, addr, err := app.conn.ReadFromUDP(buf)
+
 		if err != nil {
-			fmt.Printf("read error: %v\n", err)
+			app.logger.Error("read error", slog.Any("error", err))
 			return err
 		}
 
-		msg := buf[:n]
+		m := &protocol.Message{}
 
-		if len(msg) < 3 || len(msg)-4 != int(msg[2]) {
-			fmt.Printf("invalid lenght")
+		if err := m.Unmarshal(buf[:n]); err != nil {
+			app.logger.Error("unmarshal error", slog.Any("error", err))
 			continue
 		}
 
-		var csum byte
-		for _, c := range msg[1 : len(msg)-1] {
-			csum ^= c
-		}
-
-		if csum != msg[len(msg)-1] {
-			fmt.Printf("invalid checksum: %.2x %.2x\n", csum, msg[len(msg)-1])
-			continue
-		}
-
-		a := addr.(*net.UDPAddr)
 		app.lastTime = time.Now()
-		oldAddr := app.addr.Swap(a)
+		oldAddr := app.addr.Swap(addr)
 
-		if oldAddr == nil || oldAddr.IP.String() != a.IP.String() {
-			fmt.Printf("new client %s\n", addr)
+		if oldAddr == nil || oldAddr.IP.String() != addr.IP.String() {
+			app.logger.Info("new client " + addr.String())
 		}
 
-		code := msg[1]
-		data := msg[3 : len(msg)-2]
-
-		switch code {
+		switch m.Code {
 		case 1:
-			// ping
-			fmt.Printf("01: %s\n", arr2str(data))
-			if data[6]&4 > 0 {
-				app.WriteData(func(d *Data) {
-					d.locked = !d.locked
-					fmt.Printf("cmd lock/unlock, locked: %v\n", d.locked)
-				})
-			}
-
-			if data[6]&16 > 0 && app.data.inAir {
-				fmt.Println("cmd land")
-				app.WriteData(func(d *Data) {
-					d.landing = true
-				})
-				time.AfterFunc(time.Second*5, func() {
-					app.WriteData(func(d *Data) {
-						d.landing = false
-						d.inAir = false
-						d.locked = false
-						d.alt = 0
-					})
-				})
-			}
-
-			if data[6]&8 > 0 && !app.data.inAir {
-				fmt.Println("cmd takeoff")
-				app.WriteData(func(d *Data) {
-					d.inAir = true
-					d.locked = true
-					d.alt = 2
-				})
-			}
-
-			if c := data[3]; c != 0x80 {
-				app.WriteData(func(d *Data) {
-					d.yaw -= float64(int(c)-0x80) / 40
-					fmt.Printf("yaw: %.2f\n", d.yaw)
-				})
-			}
-
-			if data[5] == 0x18 {
-				app.WriteData(func(d *Data) {
-					d.hiSpeed = true
-				})
-			}
-
-			if data[5] == 8 {
-				app.WriteData(func(d *Data) {
-					d.hiSpeed = false
-				})
-			}
-
-			break
+			//app.logger.Debug("message " + m.String())
+			app.processCommand(m.Data)
 		case 0x7e:
-			msg := createMessage(0xfe, str2byte("48462d584c2d584c303132533031312e3032312e3132323205"))
+			msg := protocol.NewMessage(0xfe, str2byte("48462d584c2d584c303132533031312e3032312e3132323205"))
 			app.ch <- msg
-			break
 		case 0x0a:
-			msg := createMessage(0x8a, str2byte("584c30313253465878800c08"))
+			msg := protocol.NewMessage(0x8a, str2byte("584c30313253465878800c08"))
 			app.ch <- msg
-			break
 		case 0x0b:
 			break
 		case 0x1b:
 			break
-		default:
-			fmt.Printf("%.2x: %s\n", code, arr2str(data))
+		case 0x1e:
+			break
 		}
-
 	}
-	return nil
 }
 
 func (app *App) Sender() {
+	app.logger.Info("sender is started")
+
 	for msg := range app.ch {
-		conn := app.conn.Load()
 		addr := app.addr.Load()
-		if conn == nil || addr == nil {
+
+		if app.conn == nil || addr == nil {
 			time.Sleep(time.Millisecond * 100)
 			continue
 		}
 
-		conn.WriteTo(msg, addr)
+		msg.Back = true
+
+		if _, err := app.conn.WriteTo(msg.Marshal(), addr); err != nil {
+			app.logger.Error("write err", slog.Any("error", err))
+		}
 	}
 }
 
-func (app *App) Crone() {
-	var n uint64
+func (app *App) Cron() {
+	var n int
 
-	for range time.Tick(time.Millisecond * 200) {
+	for range time.Tick(time.Millisecond * 500) {
 		addr := app.addr.Load()
 		if addr == nil {
 			continue
 		}
 		if time.Now().Sub(app.lastTime) > time.Second*3 {
-			fmt.Println("remove client")
+			app.logger.Info("remove stale client " + addr.String())
 			app.addr.Store(nil)
 		}
+
 		n++
-		//fmt.Println(arr2str(msg))
-		app.ch <- app.makeGyro()
-		if n%4 == 0 {
-			app.ch <- app.makeLL()
-			app.ch <- app.makeBatt()
-		}
+		app.data.dist = n * 10 % 1500
+
+		app.ch <- app.makeGyro(n)
+
+		app.ch <- app.makeLL(n)
+		app.ch <- app.makeBatt(n)
 	}
 }
 
-func createMessage(code byte, data []byte) []byte {
-	res := make([]byte, len(data)+4)
-	res[0] = 0x58
-	res[1] = code
-	res[2] = byte(len(data))
-	for i, c := range data {
-		res[i+3] = c
-	}
-	var csum byte
-	for _, c := range res[1 : len(res)-1] {
-		csum ^= c
-	}
-	res[len(res)-1] = csum
-	return res
-}
+func (app *App) processCommand(data []byte) {
+	var oldData []byte
 
-func arr2str(d []byte) string {
-	b := strings.Builder{}
-	for i, c := range d {
-		if i > 0 {
-			b.WriteString(" ")
+	app.WriteData(func(d *Data) {
+		oldData = d.cmd
+		d.cmd = data
+	})
+
+	for i, n := range oldData {
+		if n != data[i] {
+			fmt.Printf("%d %.2x -> %.2x\n", i, n, data[i])
 		}
-		b.WriteString(fmt.Sprintf("%.2x", c))
 	}
-	return b.String()
+	if data[6]&4 > 0 {
+		app.WriteData(func(d *Data) {
+			d.flags["armed"] = !d.flags["armed"]
+			fmt.Printf("cmd arm/disarm, armed: %v\n", d.flags["armed"])
+		})
+	}
+
+	if data[6]&8 > 0 && !app.data.flags["in_air"] {
+		fmt.Println("cmd takeoff")
+		app.WriteData(func(d *Data) {
+			d.flags["in_air"] = true
+			d.flags["armed"] = false
+			d.alt = 8
+		})
+	}
+
+	if data[6]&16 > 0 && app.data.flags["in_air"] {
+		fmt.Println("cmd land")
+		app.WriteData(func(d *Data) {
+			d.flags["landing"] = true
+		})
+
+		time.AfterFunc(time.Second*3, func() {
+			app.WriteData(func(d *Data) {
+				d.flags["landing"] = false
+				d.flags["in_air"] = false
+				d.flags["armed"] = true
+				d.alt = 0
+			})
+		})
+	}
+
+	if c := data[3]; c != 0x80 {
+		app.WriteData(func(d *Data) {
+			d.yaw -= float64(int(c)-0x80) / 40
+			fmt.Printf("yaw: %.2f\n", d.yaw)
+		})
+	}
+
+	if data[5] == 0x18 {
+		app.WriteData(func(d *Data) {
+			d.flags["hi_speed"] = true
+		})
+	}
+
+	if data[5] == 8 {
+		app.WriteData(func(d *Data) {
+			d.flags["hi_speed"] = false
+		})
+	}
+
+	if d := data[7]; d != 0 {
+		fmt.Println("cmd gimble")
+		if d == 0x40 {
+			// gimble down
+		}
+		if d == 0x80 {
+			// gimble up
+		}
+	}
+
+	// 8 1 - ip, 0 - remote
 }
 
 func str2byte(s string) []byte {

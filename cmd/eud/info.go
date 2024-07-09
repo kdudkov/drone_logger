@@ -7,8 +7,15 @@ import (
 )
 
 type DroneInfo struct {
-	info    sync.Map
-	updated time.Time
+	info sync.Map
+	ts   sync.Map
+}
+
+func NewInfo() *DroneInfo {
+	return &DroneInfo{
+		info: sync.Map{},
+		ts:   sync.Map{},
+	}
 }
 
 func (d *DroneInfo) getString(key string) string {
@@ -61,4 +68,5 @@ func (d *DroneInfo) getBool(key string) bool {
 
 func (d *DroneInfo) put(key string, v any) {
 	d.info.Store(key, v)
+	d.info.Store(key, time.Now())
 }

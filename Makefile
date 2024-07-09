@@ -20,6 +20,10 @@ dep:
 checkdep:
 	go list -u -f '{{if (and (not (or .Main .Indirect)) .Update)}}{{.Path}}: {{.Version}} -> {{.Update.Version}}{{end}}' -m all 2> /dev/null
 
+.PHONE: update
+update:
+	rm go.sum; go get -u ./...
+
 .PHONY: test
 test:
 	go test -v ./...
@@ -32,4 +36,4 @@ build: clean dep
 .PHONY: gox
 gox: clean dep
 	[ -d bin ] || mkdir bin
-	GOARM=5 gox --osarch="linux/amd64" -output "bin/{{.Dir}}_{{.OS}}_{{.Arch}}" $(LDFLAGS) ./cmd/...
+	GOARM=5 gox --osarch="linux/amd64" -output "bin/{{.OS}}_{{.Arch}}/{{.Dir}}" $(LDFLAGS) ./cmd/...

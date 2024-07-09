@@ -8,8 +8,9 @@ import (
 
 type Drone interface {
 	Start(ctx context.Context)
-	SetWriter(writer io.Writer)
-	AddCommand(b []byte)
+	Stop()
+	SetLogger(logger io.Writer)
+	AddCommand(m *Message)
 }
 
 func str2byte(s string) []byte {
